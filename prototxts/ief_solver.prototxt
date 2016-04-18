@@ -1,4 +1,4 @@
-net: "prototxts/ief_train.prototxt"
+net: "prototxts/ief_train_bn.prototxt"
 test_iter: 1
 test_interval: 50001
 display: 10
@@ -12,6 +12,6 @@ iter_size: 1
 max_iter: 1000
 weight_decay: 0.0005
 snapshot: 1000
-snapshot_prefix: "/media/dey/debidatd/caffemodels/ief"
+snapshot_prefix: "/media/dey/debidatd/caffemodels/ief_bn"
 debug_info: false
 random_seed: 1312

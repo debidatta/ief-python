@@ -11,17 +11,62 @@ import matplotlib.cm as cm
 import os
 from PIL import Image
 
+def getboundingbox(kps):
+    x = min(kps[:,0])
+    y = min(kps[:,1])
+    w = max(kps[:,0]) - x
+    h = max(kps[:,1]) - y 
+    return x, y, w, h
+
 def get_heatmap_from_kp(cx, cy, w, h):
     x = np.linspace(1, w, w)
     y = np.linspace(1, h, h)
     X, Y = np.meshgrid(x, y)
-    Z = ml.bivariate_normal(X, Y, 5, 5, cx, cy)
+    Z = ml.bivariate_normal(X, Y, 2.5, 2.5, cx, cy)
     if np.max(Z) != 0:
         Z = Z/np.max(Z)
     return Z
 
 class ImageKPDataLayer(caffe.Layer):
     """Data layer used for preparing input images and keypoint heatmaps."""
+    def augment_data(self, im, kps, curr_kps):
+        # image cropping
+        kps = kps.reshape((len(kps)/2, 2))
+        curr_kps = curr_kps.reshape((len(curr_kps)/2, 2))
+        x, y, w, h = getboundingbox(kps)
+        crop_pad_inf = 1.5
+        crop_pad_sup = 2.0
+        shift = 5
+        # bounding rect extending
+        inf, sup = crop_pad_inf, crop_pad_sup
+        r = sup - inf
+        pad_w_r = np.random.rand() * r + inf  # inf~sup
+        pad_h_r = np.random.rand() * r + inf  # inf~sup
+        x -= (w * pad_w_r - w) / 2
+        y -= (h * pad_h_r - h) / 2
+        w *= pad_w_r
+        h *= pad_h_r
+    
+        # shifting
+        x += np.random.rand() * shift * 2 - shift
+        y += np.random.rand() * shift * 2 - shift
+
+        # clipping
+        x, y, w, h = [int(z) for z in [x, y, w, h]]
+        x = np.clip(x, 0, im.shape[1] - 1)
+        y = np.clip(y, 0, im.shape[0] - 1)
+        w = np.clip(w, 1, im.shape[1] - (x + 1))
+        h = np.clip(h, 1, im.shape[0] - (y + 1))
+        im = im[y:y + h, x:x + w]
+
+        # joint shifting
+        kps = np.asarray([(j[0] - x, j[1] - y) for j in kps])
+        kps = kps.flatten()
+        curr_kps = np.asarray([(j[0] - x, j[1] - y) for j in curr_kps])
+        curr_kps = curr_kps.flatten()
+
+        return im, kps, curr_kps
+
     def im_kps_list_to_blob(self, ims, kps):
         """Convert a list of keypoint heatmaps into a network input.
         Assumes images are already prepared (means subtracted, BGR order, ...).
@@ -59,18 +104,22 @@ class ImageKPDataLayer(caffe.Layer):
 
         return im
 
-    def prep_error_kps_for_blob(self, curr_kp, kps_file, kps_list):
+    def get_true_kps(self, kps_file, kps_list):
         with open(os.path.join(self._dataset_root, kps_file)) as f:
             kps_all = [map(float, x.strip().split()) for x in f.readlines()]
         kp_list = []
         for i,kp_id in enumerate(kps_list):
-            x = kps_all[kp_id][1]/960.0 * self._resize
-            y = kps_all[kp_id][2]/540.0 * self._resize
-            kp_list.extend([x,y])
-        return np.array([(true_pt-curr_pt)/self._resize for curr_pt, true_pt in zip(curr_kp, kp_list)])
+            x = kps_all[kp_id][1]
+            y = kps_all[kp_id][2]
+            kp_list.append(x)
+            kp_list.append(y)
+        return np.array(kp_list)
+
+    def prep_error_kps_for_blob(self, curr_kps, true_kps):
+        return np.array([(true_pt-curr_pt)/self._resize for curr_pt, true_pt in zip(curr_kps, true_kps)])
 
     def prep_kps_for_blob(self, curr_kp):#, transform_params):
-       for i in xrange(0, len(curr_kp), 2):
+        for i in xrange(0, len(curr_kp), 2):
             x = curr_kp[i]
             y = curr_kp[i+1]
             kp_heatmap =  get_heatmap_from_kp(x, y, self._resize, self._resize)
@@ -78,7 +127,7 @@ class ImageKPDataLayer(caffe.Layer):
                 shape = kp_heatmap.shape
                 kps = np.zeros((shape[0], shape[1], len(curr_kp)/2), dtype=np.float32)
             kps[:,:,i/2] = kp_heatmap
-       return kps    
+        return kps    
             
     def get_minibatch(self, minibatch_db):
         num_images = len(minibatch_db)
@@ -87,12 +136,25 @@ class ImageKPDataLayer(caffe.Layer):
         processed_error_kps = []
         for i in xrange(num_images):
             im = cv2.imread(os.path.join(self._dataset_root, minibatch_db[i]['im']))
-            im = cv2.resize(im, (self._resize, self._resize))
+            size = self._resize
+            orig_h, orig_w, _ = im.shape
+            true_kps = self.get_true_kps(minibatch_db[i]['kp'], self._kps)
+            curr_kps = np.array(minibatch_db[i]['curr_kp'])
+            curr_kps[0::2] = curr_kps[0::2] / size * float(orig_w)
+            curr_kps[1::2] = curr_kps[1::2] / size * float(orig_h)
+            if self._phase == 'TRAIN':
+                im, true_kps, curr_kps = self.augment_data(im, true_kps, curr_kps)
+            true_kps[0::2] = true_kps[0::2] / float(orig_w) * size
+            true_kps[1::2] = true_kps[1::2] / float(orig_h) * size
+            curr_kps[0::2] = curr_kps[0::2] / float(orig_w) * size
+            curr_kps[1::2] = curr_kps[1::2] / float(orig_h) * size
+            im = cv2.resize(im, (size, size),
+                             interpolation=cv2.INTER_NEAREST)
             im = self.prep_im_for_blob(im)
-            kps = self.prep_kps_for_blob(minibatch_db[i]['curr_kp'])
-            error_kps = self.prep_error_kps_for_blob(minibatch_db[i]['curr_kp'], minibatch_db[i]['kp'], self._kps) 
+            kps_heatmaps = self.prep_kps_for_blob(curr_kps)
+            error_kps = self.prep_error_kps_for_blob(curr_kps, true_kps) 
             processed_ims.append(im)
-            processed_kps.append(kps)
+            processed_kps.append(kps_heatmaps)
             processed_error_kps.append(error_kps)
         # Create a blob to hold the input images
         im_kps_blob = self.im_kps_list_to_blob(processed_ims, processed_kps)

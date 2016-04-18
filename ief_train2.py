@@ -4,7 +4,7 @@ import argparse
 from shutil import copyfile
 import os
 
-caffe_root = '/home/debidatd/caffe/'
+caffe_root = '/home/debidatd/parsenet/'
 sys.path.insert(0, caffe_root + 'python')
 
 import caffe
@@ -29,6 +29,18 @@ parser.add_argument("--test_interval", help="Test interval or run test after tes
 parser.add_argument("--kps_folder", help="Folder to store keypoints after each run and error in keypoint", default='curr_kps/')
 args = parser.parse_args()
 
+#with open('curr_kps_train2.txt','w') as tmpf:
+#    for i in xrange(12680):
+#        for j in xrange(21):
+#            tmpf.write("112.0 112.0 ")
+#        tmpf.write("\n")
+
+#with open('curr_kps_test2.txt','w') as tmpf:
+#    for i in xrange(1000):
+#        for j in xrange(21):
+#            tmpf.write("112.0 112.0 ")
+#        tmpf.write("\n")
+
 # caffe.set_mode_cpu()
 caffe.set_mode_gpu()
 caffe.set_device(args.gpu)
@@ -49,10 +61,10 @@ test_loss = np.zeros(args.train_iter)
 f = open(args.log_train, 'w')
 g = open(args.log_test, 'w')
 
-copyfile('curr_kps_train.txt', os.path.join(args.kps_folder, 'curr_kps_train_0.txt'))
-copyfile('curr_kps_test.txt', os.path.join(args.kps_folder, 'curr_kps_test_0.txt'))
-train_net = 'prototxts/error_train_bn.prototxt'
-test_net = 'prototxts/error_test_bn.prototxt'
+copyfile('curr_kps_train2.txt', os.path.join(args.kps_folder, 'curr_kps_train_%s.txt'%args.resume))
+copyfile('curr_kps_test2.txt', os.path.join(args.kps_folder, 'curr_kps_test_%s.txt'%args.resume))
+train_net = 'prototxts/error_train2.prototxt'
+test_net = 'prototxts/error_test2.prototxt'
 test_niter = 25
 train_niter = 317
 
@@ -83,14 +95,14 @@ for n in xrange(args.resume, args.runs):
     error_kps_file = os.path.join(args.kps_folder, 'error_train_%s.txt'%(n))
     find_errors(train_net, last_run_snapshot, error_kps_file, train_niter, 40, args.gpu)
     curr_kps_train_file = os.path.join(args.kps_folder, 'curr_kps_train_%s.txt'%n)
-    add_errors(curr_kps_train_file, error_kps_file, 'curr_kps_train.txt')
-    copyfile('curr_kps_train.txt', os.path.join(args.kps_folder, 'curr_kps_train_%s.txt'%(n+1)))
+    add_errors(curr_kps_train_file, error_kps_file, 'curr_kps_train2.txt')
+    copyfile('curr_kps_train2.txt', os.path.join(args.kps_folder, 'curr_kps_train_%s.txt'%(n+1)))
 
     error_kps_file = os.path.join(args.kps_folder, 'error_test_%s.txt'%(n))
     find_errors(test_net, last_run_snapshot, error_kps_file, test_niter, 40, args.gpu)
     curr_kps_test_file = os.path.join(args.kps_folder, 'curr_kps_test_%s.txt'%n)
-    add_errors(curr_kps_test_file, error_kps_file, 'curr_kps_test.txt')
-    copyfile('curr_kps_test.txt', os.path.join(args.kps_folder, 'curr_kps_test_%s.txt'%(n+1)))
+    add_errors(curr_kps_test_file, error_kps_file, 'curr_kps_test2.txt')
+    copyfile('curr_kps_test2.txt', os.path.join(args.kps_folder, 'curr_kps_test_%s.txt'%(n+1)))
 
 f.close()
 g.close()

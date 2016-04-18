@@ -21,7 +21,7 @@ def find_errors(prototxt, caffemodel, error_file, batch_count, batch_size, gpu_i
             for j in range(batch_size):
                 errors = net.blobs['fc8_err_kps'].data[j,:]
                 true_labels = net.blobs['error_kps'].data[j,:]
-                for k in xrange(100):
+                for k in xrange(42):
                     f.write('%s '%errors[k])
                 f.write("\n")
     
